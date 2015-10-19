@@ -1,15 +1,18 @@
 module SignupForm where
 
 
-import Effects
+import Http
+import Task exposing (Task)
+import Json.Decode exposing (succeed)
 import StartApp
+import Effects
 import Html exposing (..)
 import Html.Events exposing (..)
 import Html.Attributes exposing (id, type', for, value, class)
 
 --MODEL
 initialErrors =
-    { username = "", password = ""}
+    { username = "", password = "", usernameTaken = False }
 
 
 initialModel = 
@@ -17,6 +20,13 @@ initialModel =
 
 
 --VIEW
+viewUsernameErrors model =
+    if model.errors.usernameTaken then
+        "That username is taken!"
+    else
+        model.errors.username
+
+
 view actionDispatcher model =
     form [ id "signup-form" ] [
         h1 [] [ text "Sensational Signup Form" ]
@@ -29,7 +39,7 @@ view actionDispatcher model =
                 {actionType = "SET_USERNAME", payload = str}) 
             ] 
             []
-        , div [ class "validation-error" ] [ text model.errors.username ]
+        , div [ class "validation-error" ] [ text (viewUsernameErrors model) ]
         , label [ for "password" ] [ text "password:" ]
         , input 
             [ id "password-field"
@@ -58,17 +68,48 @@ getErrors model =
             "Please enter a password!"
         else
             ""
+
+    , usernameTaken = 
+        model.errors.usernameTaken
     }   
+
+
+withUsernameTaken isTaken model =
+    let
+        currentErrors =
+            model.errors
+
+        newErrors = 
+            {currentErrors | usernameTaken <- isTaken }
+    in 
+        { model | errors <- newErrors }
 
 
 update action model =
     if 
+
         | action.actionType == "VALIDATE" ->
-            ( { model | errors <- getErrors model }, Effects.none )
+            let
+                url =
+                    "https://api.github.com/users/" ++ model.username
+                usernameTakenAction =
+                    { actionType = "USERNAME_TAKEN", payload = "" }
+                usernameAvailableAction =
+                    { actionType = "USERNAME_AVAILABLE", payload = "" }
+                request =
+                    Http.get (succeed usernameTakenAction) url
+                neverFailingRequest =
+                    Task.onError request (\err -> Task.succeed usernameAvailableAction)
+            in
+                ({ model | errors <- getErrors model }, Effects.task neverFailingRequest)
         | action.actionType == "SET_USERNAME" ->
             ( { model | username <- action.payload }, Effects.none )
         | action.actionType == "SET_PASSWORD" ->
             ( { model | password <- action.payload }, Effects.none )
+        | action.actionType == "USERNAME_TAKEN" ->
+            ( withUsernameTaken True model, Effects.none )
+        | action.actionType == "USERNAME_AVAILABLE" ->
+            ( withUsernameTaken False model, Effects.none )
         | otherwise ->
             ( model, Effects.none )
 
@@ -81,6 +122,11 @@ app =
         , view = view
         , inputs = []
         }
+
+
+port tasks : Signal (Task Effects.Never ())
+port tasks =
+    app.tasks
 
 
 main =
